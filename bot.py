@@ -107,6 +107,50 @@ class ClickUpClient:
                 logger.error(f"Response content: {e.response.text}")
             raise
 
+    def get_tasks_from_list(self, list_id: str) -> List[dict]:
+        """Get all tasks from a specific list"""
+        url = f"{self.base_url}/list/{list_id}/task"
+        
+        try:
+            response = requests.get(url, headers=self.headers)
+            response.raise_for_status()
+            data = response.json()
+            return data.get("tasks", [])
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to get tasks from list {list_id}: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f"Response content: {e.response.text}")
+            return []
+    
+    def get_tasks_from_newest_sprint(self) -> List[dict]:
+        """Get all tasks from the newest sprint list"""
+        newest_list = self.get_newest_list_from_folder()
+        if not newest_list:
+            logger.warning("No newest sprint list found")
+            return []
+        
+        list_id = newest_list.get('id')
+        logger.info(f"Getting tasks from newest sprint: {newest_list.get('name')} (ID: {list_id})")
+        return self.get_tasks_from_list(list_id)
+    
+    def update_task_status(self, task_id: str, status: str) -> dict:
+        """Update task status in ClickUp"""
+        url = f"{self.base_url}/task/{task_id}"
+        
+        task_data = {
+            "status": status
+        }
+        
+        try:
+            response = requests.put(url, json=task_data, headers=self.headers)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to update task status: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f"Response content: {e.response.text}")
+            raise
+
 # Initialize bot
 intents = discord.Intents.default()
 intents.message_content = True
@@ -438,24 +482,368 @@ async def handle_task_creation(message):
         
         await message.reply(embed=error_embed)
 
+def normalize_status(status_input: str) -> Optional[str]:
+    """Normalize status input to valid ClickUp status"""
+    status_mapping = {
+        "todo": "to do",
+        "to do": "to do", 
+        "backlog": "to do",
+        "start": "in progress",
+        "started": "in progress",
+        "progress": "in progress",
+        "in progress": "in progress",
+        "working": "in progress",
+        "review": "in review",
+        "in review": "in review",
+        "reviewing": "in review",
+        "done": "complete",
+        "complete": "complete",
+        "completed": "complete",
+        "finished": "complete",
+        "close": "closed",
+        "closed": "closed",
+        "resolved": "closed",
+        "fixed": "closed"
+    }
+    
+    normalized = status_input.lower().strip()
+    return status_mapping.get(normalized)
+
+async def find_similar_task(task_description: str, tasks: List[dict]) -> Optional[dict]:
+    """Use AI to find the most similar task based on semantic similarity"""
+    if not tasks or not openai.api_key:
+        return None
+    
+    try:
+        # Prepare task list for AI analysis
+        task_list = []
+        for i, task in enumerate(tasks):
+            task_name = task.get('name', 'Unnamed Task')
+            task_desc = task.get('description', '')
+            # Clean description from markdown/formatting
+            clean_desc = task_desc.replace('**', '').replace('*', '').replace('\n', ' ')[:200]
+            
+            task_info = f"{i+1}. {task_name}"
+            if clean_desc.strip():
+                task_info += f" - {clean_desc}"
+            task_list.append(task_info)
+        
+        tasks_text = "\n".join(task_list)
+        
+        system_prompt = """You are a task matching assistant. Given a task description and a list of existing tasks, find the most semantically similar task.
+
+Rules:
+- Look for semantic similarity, not just exact word matches
+- Consider synonyms, related concepts, and context
+- Focus on the main purpose/goal of the task
+- If no task is reasonably similar, return "none"
+- Return only the number of the most similar task (e.g., "3")"""
+
+        user_prompt = f"""Find the most similar task to: "{task_description}"
+
+Available tasks:
+{tasks_text}
+
+Which task number is most similar? Return only the number or "none":"""
+
+        response = openai.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            max_tokens=20,
+            temperature=0.3
+        )
+        
+        result = response.choices[0].message.content.strip().lower()
+        
+        if result == "none":
+            logger.info("AI found no similar tasks")
+            return None
+        
+        try:
+            task_index = int(result) - 1
+            if 0 <= task_index < len(tasks):
+                selected_task = tasks[task_index]
+                logger.info(f"AI selected task: {selected_task.get('name')} (confidence: semantic match)")
+                return selected_task
+            else:
+                logger.warning(f"AI returned invalid task index: {result}")
+                return None
+                
+        except ValueError:
+            logger.warning(f"Could not parse AI response: {result}")
+            return None
+        
+    except Exception as e:
+        logger.error(f"Error finding similar task: {e}")
+        return None
+
+def parse_update_command(command_text: str) -> tuple[Optional[str], Optional[str]]:
+    """Parse !update command to extract task description and status
+    
+    Examples:
+    - "!update integracja bota z clickupem review" -> ("integracja bota z clickupem", "review")
+    - "!update fix login bug in progress" -> ("fix login bug", "in progress")
+    - "!update dokumentacja closed" -> ("dokumentacja", "closed")
+    
+    Returns:
+        tuple: (task_description, status) or (None, None) if parsing fails
+    """
+    # Remove the !update prefix
+    content = command_text.replace('!update', '').strip()
+    
+    if not content:
+        return None, None
+    
+    # Valid status keywords (order matters - longer phrases first)
+    valid_statuses = ["in progress", "in review", "to do", "todo", "review", "progress", "done", "complete", "closed", "resolved", "fixed"]
+    
+    # Find status at the end of the command
+    found_status = None
+    task_description = content
+    
+    for status in valid_statuses:
+        if content.lower().endswith(status.lower()):
+            found_status = status.lower()
+            # Remove status from task description
+            task_description = content[:-len(status)].strip()
+            break
+    
+    if not found_status:
+        return None, None
+    
+    # Normalize the status
+    normalized_status = normalize_status(found_status)
+    
+    return task_description, normalized_status
+
+@bot.command(name='update')
+async def update_command(ctx, *, args=None):
+    """Update task status using AI semantic matching"""
+    if not args:
+        embed = discord.Embed(
+            title="❌ Missing Arguments",
+            description="Please provide task description and status.",
+            color=discord.Color.red()
+        )
+        embed.add_field(
+            name="Usage",
+            value="`!update <task description> <status>`",
+            inline=False
+        )
+        embed.add_field(
+            name="Examples",
+            value="`!update integracja bota z clickupem review`\n`!update fix login bug in progress`\n`!update dokumentacja api closed`",
+            inline=False
+        )
+        embed.add_field(
+            name="Valid Statuses",
+            value="`to do`, `in progress`, `in review`, `closed`",
+            inline=False
+        )
+        await ctx.send(embed=embed)
+        return
+    
+    # Parse the command
+    full_command = f"!update {args}"
+    task_description, new_status = parse_update_command(full_command)
+    
+    if not task_description or not new_status:
+        embed = discord.Embed(
+            title="❌ Invalid Command Format",
+            description="Could not parse task description and status.",
+            color=discord.Color.red()
+        )
+        embed.add_field(
+            name="Example",
+            value="`!update integracja bota review`",
+            inline=False
+        )
+        embed.add_field(
+            name="Valid Statuses",
+            value="`to do`, `in progress`, `in review`, `closed`",
+            inline=False
+        )
+        await ctx.send(embed=embed)
+        return
+    
+    try:
+        # Send typing indicator
+        async with ctx.typing():
+            # Get tasks from newest sprint
+            logger.info(f"Looking for tasks similar to: '{task_description}' with status: '{new_status}'")
+            tasks = clickup_client.get_tasks_from_newest_sprint()
+            
+            if not tasks:
+                embed = discord.Embed(
+                    title="❌ No Tasks Found",
+                    description="No tasks found in the newest sprint list.",
+                    color=discord.Color.red()
+                )
+                await ctx.send(embed=embed)
+                return
+            
+            logger.info(f"Found {len(tasks)} tasks in newest sprint")
+            
+            # Find similar task using AI
+            similar_task = await find_similar_task(task_description, tasks)
+            
+            if not similar_task:
+                embed = discord.Embed(
+                    title="❌ No Similar Task Found",
+                    description=f"Could not find a task similar to: '{task_description}'",
+                    color=discord.Color.red()
+                )
+                embed.add_field(
+                    name="Available Tasks",
+                    value=f"Found {len(tasks)} tasks in newest sprint. Use `!tasks` to see all tasks.",
+                    inline=False
+                )
+                await ctx.send(embed=embed)
+                return
+            
+            # Update task status
+            task_id = similar_task.get('id')
+            task_name = similar_task.get('name')
+            current_status = similar_task.get('status', {}).get('status', 'Unknown')
+            
+            logger.info(f"Updating task '{task_name}' (ID: {task_id}) from '{current_status}' to '{new_status}'")
+            
+            update_response = clickup_client.update_task_status(task_id, new_status)
+            
+            # Create success embed
+            embed = discord.Embed(
+                title="✅ Task Updated Successfully!",
+                description=f"Found and updated the most similar task using AI semantic matching.",
+                color=discord.Color.green(),
+                timestamp=datetime.utcnow()
+            )
+            
+            embed.add_field(
+                name="🔍 Search Query",
+                value=task_description,
+                inline=False
+            )
+            
+            embed.add_field(
+                name="🎯 Matched Task",
+                value=task_name,
+                inline=False
+            )
+            
+            embed.add_field(
+                name="📊 Status Change",
+                value=f"`{current_status}` → `{new_status}`",
+                inline=True
+            )
+            
+            embed.add_field(
+                name="🆔 Task ID",
+                value=task_id,
+                inline=True
+            )
+            
+            if 'url' in similar_task:
+                embed.add_field(
+                    name="🔗 Task URL",
+                    value=f"[View in ClickUp]({similar_task['url']})",
+                    inline=True
+                )
+            
+            embed.set_footer(text="ClickUp Discord Bot • AI Task Matching")
+            await ctx.send(embed=embed)
+            
+    except Exception as e:
+        logger.error(f"Error updating task: {e}")
+        
+        error_embed = discord.Embed(
+            title="❌ Error Updating Task",
+            description=f"Sorry, I encountered an error: {str(e)}",
+            color=discord.Color.red(),
+            timestamp=datetime.utcnow()
+        )
+        
+        await ctx.send(embed=error_embed)
+
+@bot.command(name='tasks')
+async def tasks_command(ctx):
+    """Show all tasks from newest sprint list"""
+    try:
+        tasks = clickup_client.get_tasks_from_newest_sprint()
+        
+        if not tasks:
+            await ctx.send("❌ No tasks found in newest sprint list")
+            return
+        
+        # Get newest list info
+        newest_list = clickup_client.get_newest_list_from_folder()
+        list_name = newest_list.get('name', 'Unknown') if newest_list else 'Unknown'
+        
+        embed = discord.Embed(
+            title=f"📋 Tasks in {list_name}",
+            description=f"Found {len(tasks)} tasks:",
+            color=discord.Color.blue()
+        )
+        
+        # Limit to 10 tasks for display
+        display_tasks = tasks[:10]
+        
+        for i, task in enumerate(display_tasks):
+            task_name = task.get('name', 'Unnamed Task')
+            task_status = task.get('status', {}).get('status', 'No Status')
+            task_id = task.get('id', 'Unknown')
+            
+            embed.add_field(
+                name=f"{i+1}. {task_name[:50]}{'...' if len(task_name) > 50 else ''}",
+                value=f"Status: `{task_status}`\nID: `{task_id}`",
+                inline=True
+            )
+        
+        if len(tasks) > 10:
+            embed.add_field(
+                name="⚠️ Note",
+                value=f"Showing first 10 of {len(tasks)} tasks",
+                inline=False
+            )
+        
+        await ctx.send(embed=embed)
+        
+    except Exception as e:
+        logger.error(f"Error getting tasks: {e}")
+        await ctx.send(f"❌ Error getting tasks: {e}")
+
 @bot.command(name='help')
 async def help_command(ctx):
     """Show help information"""
     embed = discord.Embed(
         title="🤖 ClickUp Discord Bot Help",
-        description="I help you create ClickUp tasks directly from Discord using AI!",
+        description="I help you create and manage ClickUp tasks directly from Discord using AI!",
         color=discord.Color.blue()
     )
     
     embed.add_field(
-        name="🎯 How to use",
+        name="🎯 Create Tasks",
         value="Simply mention me (@bot) in any message with your task description, and I'll create a ClickUp task with an AI-generated title based on channel context!",
         inline=False
     )
     
     embed.add_field(
-        name="💡 Example",
+        name="💡 Create Example",
         value=f"@{bot.user.display_name if bot.user else 'bot'} Review the new authentication system",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="🔄 Update Tasks",
+        value="Use `!update <task description> <status>` to find and update similar tasks using AI semantic matching.",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="🔄 Update Examples",
+        value="`!update integracja bota review`\n`!update fix login bug in progress`\n`!update dokumentacja api closed`",
         inline=False
     )
     
@@ -467,13 +855,19 @@ async def help_command(ctx):
     
     embed.add_field(
         name="⚡ Commands",
-        value="`!help` - Show this help message\n`!status` - Check bot status\n`!health` - Simple health check\n`!lists` - Show available lists",
+        value="`!help` - Show this help message\n`!update` - Update task status with AI matching\n`!tasks` - Show tasks in newest sprint\n`!status` - Check bot status\n`!health` - Simple health check\n`!lists` - Show available lists",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="📊 Valid Statuses",
+        value="`to do`, `in progress`, `in review`, `closed`",
         inline=False
     )
     
     embed.add_field(
         name="🧠 AI Features",
-        value="• Smart title generation using OpenAI\n• Channel context analysis\n• Actionable task titles\n• Intelligent list routing",
+        value="• Smart title generation using OpenAI\n• Semantic task matching\n• Channel context analysis\n• Intelligent list routing",
         inline=False
     )
     

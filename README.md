@@ -1,96 +1,34 @@
-# Discord ClickUp Bot
+# Discord ClickUp Bot 🤖
 
-A Discord bot that automatically creates ClickUp tasks when mentioned in Discord messages. Perfect for turning Discord conversations into actionable tasks in your project management workflow.
+Advanced Discord bot that creates and manages ClickUp tasks using AI-powered semantic analysis and intelligent context filtering.
 
-## Features
+## Features 🚀
 
-- 🤖 **Automatic Task Creation**: Mention the bot with a message to create a ClickUp task
-- 📋 **Rich Task Details**: Tasks include message content, author info, channel, timestamp, and link back to Discord
-- 🎨 **Beautiful Embeds**: Clean Discord embeds for feedback and status
-- ⚡ **Real-time Response**: Instant feedback when tasks are created
-- 🔧 **Easy Configuration**: Simple environment variable setup
-- 📝 **Logging**: Comprehensive logging for debugging and monitoring
+### 🎯 Task Creation
+- **AI-Powered Task Titles**: Generates intelligent, actionable task titles using OpenAI GPT-4o
+- **Smart Context Analysis**: Filters channel history to include only relevant messages for context
+- **Intelligent List Routing**: 
+  - Messages containing "backlog" → Backlog list
+  - Other messages → Newest Sprint list (from specified folder)
+- **Rich Task Descriptions**: Includes Discord context, author info, and message links
 
-## Prerequisites
+### 🔄 Task Management  
+- **Semantic Task Matching**: Find and update tasks using AI-powered similarity matching
+- **Status Updates**: Update task statuses with natural language commands
+- **Sprint Integration**: Automatically works with the newest sprint list
 
-1. **Discord Bot**: Create a Discord application and bot at [Discord Developer Portal](https://discord.com/developers/applications)
-2. **ClickUp API**: Get your ClickUp API token from [ClickUp Settings](https://app.clickup.com/settings/apps)
-3. **Python 3.8+**: Make sure you have Python 3.8 or higher installed
+### 🧠 AI Features
+- **Context Filtering**: AI analyzes channel history and selects only relevant messages
+- **Semantic Understanding**: Matches tasks based on meaning, not just keywords
+- **Smart Title Generation**: Creates concise, actionable task titles from descriptions
+- **Natural Language Processing**: Understands various status formats and synonyms
 
-## Setup Instructions
+## Commands 📋
 
-### 1. Discord Bot Setup
+### Core Commands
 
-1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
-2. Click "New Application" and give it a name
-3. Go to the "Bot" section in the left sidebar
-4. Click "Add Bot"
-5. Copy the bot token (you'll need this for the `.env` file)
-6. Under "Privileged Gateway Intents", enable:
-   - Message Content Intent
-   - Server Members Intent (optional)
-
-### 2. Discord Bot Permissions
-
-When inviting the bot to your server, make sure it has these permissions:
-- Read Messages/View Channels
-- Send Messages
-- Embed Links
-- Read Message History
-- Add Reactions (optional)
-
-Invite URL template:
-```
-https://discord.com/api/oauth2/authorize?client_id=YOUR_BOT_CLIENT_ID&permissions=412384&scope=bot
-```
-
-### 3. ClickUp Setup
-
-1. Go to [ClickUp Settings > Apps](https://app.clickup.com/settings/apps)
-2. Generate a new API token
-3. Copy the token (you'll need this for the `.env` file)
-4. Find your List ID:
-   - Go to the ClickUp list where you want tasks created
-   - Copy the list ID from the URL: `https://app.clickup.com/.../list/LIST_ID`
-
-### 4. Installation
-
-1. Clone or navigate to the bot directory:
-   ```bash
-   cd misc/discord-bot
-   ```
-
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. Create environment file:
-   ```bash
-   cp env.example .env
-   ```
-
-4. Edit `.env` file with your credentials:
-   ```env
-   DISCORD_BOT_TOKEN=your_discord_bot_token_here
-   CLICKUP_API_TOKEN=your_clickup_api_token_here
-   CLICKUP_LIST_ID=your_clickup_list_id_here
-   CLICKUP_TEAM_ID=your_clickup_team_id_here  # Optional
-   ```
-
-### 5. Running the Bot
-
-```bash
-python bot.py
-```
-
-The bot will start and show a "connected to Discord" message when ready.
-
-## Usage
-
-### Creating Tasks
-
-Simply mention the bot in any Discord message with your task description:
+#### Create Tasks
+Simply mention the bot with your task description:
 
 ```
 @YourBot Please review the new authentication system
@@ -225,3 +163,18 @@ Feel free to submit issues and enhancement requests!
 ## License
 
 This project is licensed under the MIT License. 
+
+## Valid Task Statuses 📊
+
+The bot accepts various status formats and automatically normalizes them:
+
+| Input Formats | Normalized Status |
+|---------------|------------------|
+| `to do`, `todo`, `backlog` | `to do` |
+| `in progress`, `progress`, `working`, `started` | `in progress` |
+| `in review`, `review`, `reviewing` | `in review` |
+| `done`, `complete`, `completed`, `finished` | `complete` |
+| `closed`, `close`, `resolved`, `fixed` | `closed` |
+
+#### Update Tasks
+Use semantic matching to find and update existing tasks:
