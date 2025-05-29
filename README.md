@@ -29,140 +29,33 @@ Advanced Discord bot that creates and manages ClickUp tasks using AI-powered sem
 
 #### Create Tasks
 Simply mention the bot with your task description:
-
 ```
-@YourBot Please review the new authentication system
-```
-
-```
-@YourBot Bug: Users can't log in with special characters in password
+@bot Review the new authentication system
+@bot backlog Create API documentation
+@bot Fix login bug with special characters
 ```
 
+#### Update Tasks
+Use semantic matching to find and update existing tasks:
 ```
-@YourBot Create documentation for the new API endpoints
-```
-
-### Commands
-
-- `!help` - Show help information
-- `!status` - Check bot status and ping
-
-### Task Details
-
-Each created ClickUp task will include:
-- **Task Name**: "Discord Task: [first 50 characters of message]"
-- **Description**: Full message content plus metadata
-- **Author**: Discord username and display name
-- **Channel**: Where the message was sent
-- **Server**: Which Discord server
-- **Timestamp**: When the message was sent
-- **Link**: Direct link back to the Discord message
-
-## Configuration
-
-### Environment Variables
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `DISCORD_BOT_TOKEN` | Yes | Your Discord bot token |
-| `CLICKUP_API_TOKEN` | Yes | Your ClickUp API token |
-| `CLICKUP_LIST_ID` | Yes | ClickUp list ID where tasks will be created |
-| `CLICKUP_TEAM_ID` | No | ClickUp team ID (for team member features) |
-
-### Customization
-
-You can customize the bot behavior by modifying `bot.py`:
-
-- **Task Priority**: Change the `priority` value in the `create_task` method (1=Urgent, 2=High, 3=Normal, 4=Low)
-- **Task Status**: Modify the `status` field to set a different default status
-- **Bot Prefix**: Change the `command_prefix` in the bot initialization
-- **Response Messages**: Customize the embed messages and responses
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Bot doesn't respond to mentions**:
-   - Check that Message Content Intent is enabled in Discord Developer Portal
-   - Verify the bot has permission to read messages in the channel
-
-2. **ClickUp API errors**:
-   - Verify your API token is correct
-   - Check that the List ID exists and you have access to it
-   - Ensure your ClickUp plan supports API access
-
-3. **Bot goes offline**:
-   - Check the console for error messages
-   - Verify your Discord token is still valid
-   - Check your internet connection
-
-### Debug Mode
-
-To enable more detailed logging, modify the logging level in `bot.py`:
-
-```python
-logging.basicConfig(level=logging.DEBUG)
+!update integracja bota z clickupem review
+!update fix login bug in progress  
+!update dokumentacja api closed
+!update authentication system resolved
 ```
 
-### Testing the Setup
-
-1. Test ClickUp connection:
-   ```python
-   # Add this to test your ClickUp setup
-   from bot import ClickUpClient
-   import os
-   from dotenv import load_dotenv
-   
-   load_dotenv()
-   client = ClickUpClient(
-       api_token=os.getenv('CLICKUP_API_TOKEN'),
-       list_id=os.getenv('CLICKUP_LIST_ID')
-   )
-   
-   # This should create a test task
-   response = client.create_task("Test Task", "This is a test task from the bot setup")
-   print(response)
-   ```
-
-## Security Notes
-
-- Keep your `.env` file secure and never commit it to version control
-- Regularly rotate your API tokens
-- Use environment variables in production deployments
-- Consider using Discord slash commands for additional security
-
-## Production Deployment
-
-For production deployment, consider:
-
-1. **Process Management**: Use PM2, systemd, or Docker
-2. **Monitoring**: Set up logging and health checks
-3. **Error Handling**: Implement proper error recovery
-4. **Rate Limiting**: Be aware of Discord and ClickUp API rate limits
-5. **Backup**: Keep backups of your configuration
-
-### Docker Deployment (Optional)
-
-Create a `Dockerfile`:
-
-```dockerfile
-FROM python:3.9-slim
-
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt
-
-COPY . .
-CMD ["python", "bot.py"]
+#### View Tasks
+```
+!tasks                    # Show tasks in newest sprint list
+!lists                    # Show available sprint lists
 ```
 
-## Contributing
-
-Feel free to submit issues and enhancement requests!
-
-## License
-
-This project is licensed under the MIT License. 
+#### Bot Management
+```
+!help                     # Show detailed help information
+!status                   # Check bot status and connections
+!health                   # Simple health check
+```
 
 ## Valid Task Statuses 📊
 
@@ -176,5 +69,347 @@ The bot accepts various status formats and automatically normalizes them:
 | `done`, `complete`, `completed`, `finished` | `complete` |
 | `closed`, `close`, `resolved`, `fixed` | `closed` |
 
-#### Update Tasks
-Use semantic matching to find and update existing tasks:
+## Setup Instructions 🔧
+
+### 1. Prerequisites
+- Docker and Docker Compose (recommended)
+- OR Python 3.8+ for local development
+- Discord Bot Token
+- ClickUp API Token
+- OpenAI API Key (recommended for AI features)
+
+### 2. Quick Start with Docker (Recommended) 🐳
+
+#### Step 1: Clone and Configure
+```bash
+cd misc/discord-bot
+cp env.example .env
+# Edit .env with your credentials
+```
+
+#### Step 2: Run the bot
+```bash
+# Make the script executable
+chmod +x docker-run.sh
+
+# Start the bot
+./docker-run.sh run
+```
+
+#### Step 3: Monitor
+```bash
+# Check status
+./docker-run.sh status
+
+# View logs
+./docker-run.sh logs
+
+# Restart if needed
+./docker-run.sh restart
+```
+
+### 3. Docker Management Commands
+
+The `docker-run.sh` script provides easy management:
+
+```bash
+./docker-run.sh build      # Build Docker image
+./docker-run.sh run        # Start the bot
+./docker-run.sh stop       # Stop the bot
+./docker-run.sh restart    # Restart the bot
+./docker-run.sh logs       # Show bot logs
+./docker-run.sh status     # Show bot status
+./docker-run.sh clean      # Clean up Docker resources
+./docker-run.sh update     # Update and restart bot
+./docker-run.sh help       # Show help
+```
+
+### 4. Manual Docker Commands
+
+If you prefer manual Docker management:
+
+```bash
+# Build the image
+docker build -t discord-clickup-bot .
+
+# Run with docker-compose
+docker-compose up -d
+
+# View logs
+docker-compose logs -f discord-bot
+
+# Stop
+docker-compose down
+```
+
+### 5. Local Development Setup
+
+For local development without Docker:
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Run the bot
+python bot.py
+
+# Or use the runner script
+python run.py
+```
+
+## Environment Configuration 🔧
+
+Create a `.env` file based on `env.example`:
+
+```env
+# Discord (Required)
+DISCORD_BOT_TOKEN=your_discord_bot_token_here
+
+# ClickUp (Required)
+CLICKUP_API_TOKEN=your_clickup_api_token_here
+CLICKUP_LIST_ID=your_backlog_list_id_here
+CLICKUP_TEAM_ID=your_team_id_here
+CLICKUP_FOLDER_ID=90155097400
+
+# OpenAI (Recommended - enables AI features)
+OPENAI_API_KEY=your_openai_api_key_here
+```
+
+### Environment Variables Reference
+
+| Variable | Required | Description | Default |
+|----------|----------|-------------|---------|
+| `DISCORD_BOT_TOKEN` | ✅ | Discord bot authentication token | - |
+| `CLICKUP_API_TOKEN` | ✅ | ClickUp API authentication token | - |
+| `CLICKUP_LIST_ID` | ✅ | Default backlog list ID | - |
+| `CLICKUP_TEAM_ID` | ✅ | ClickUp team/workspace ID | - |
+| `CLICKUP_FOLDER_ID` | ⚠️ | Sprint folder ID for current sprint lists | `90155097400` |
+| `OPENAI_API_KEY` | ⚠️ | OpenAI API key for AI features | - |
+
+## Docker Configuration Details 🐳
+
+### Dockerfile Features
+- **Base**: Python 3.11 slim image
+- **Security**: Runs as non-root user
+- **Health Checks**: Built-in Discord API connectivity checks
+- **Optimization**: Multi-stage builds and layer caching
+
+### Docker Compose Features
+- **Auto-restart**: Container restarts unless manually stopped
+- **Resource limits**: Memory and CPU constraints
+- **Log rotation**: Automatic log file management
+- **Health monitoring**: Health check integration
+- **Volume mounting**: Persistent logs directory
+
+### Production Deployment
+```bash
+# For production, you might want to:
+
+# 1. Build and tag for your registry
+docker build -t your-registry/discord-clickup-bot:v1.0 .
+docker push your-registry/discord-clickup-bot:v1.0
+
+# 2. Use production compose file
+docker-compose -f docker-compose.prod.yml up -d
+
+# 3. Set up monitoring with Watchtower (auto-updates)
+# Uncomment watchtower service in docker-compose.yml
+```
+
+## How It Works 🔍
+
+### Task Creation Process
+1. **Mention Detection**: Bot detects when it's mentioned in a message
+2. **Content Extraction**: Extracts task description from the message
+3. **Context Analysis**: AI analyzes recent channel messages for relevance
+4. **List Routing**: Determines target list based on "backlog" keyword
+5. **Title Generation**: AI creates actionable task title using context
+6. **Task Creation**: Creates task in ClickUp with rich description
+
+### Task Update Process
+1. **Command Parsing**: Extracts task description and desired status
+2. **Task Retrieval**: Gets all tasks from newest sprint list
+3. **Semantic Matching**: AI finds most similar task based on meaning
+4. **Status Update**: Updates the matched task's status in ClickUp
+5. **Confirmation**: Shows what was changed with visual feedback
+
+### AI Context Filtering
+1. **Message Collection**: Gathers recent channel messages (up to 20)
+2. **Relevance Analysis**: AI evaluates which messages relate to the task
+3. **Context Selection**: Only relevant messages are used for title generation
+4. **Quality Enhancement**: Results in more accurate and contextual task titles
+
+## API Setup Instructions 📝
+
+### ClickUp Setup
+
+#### Get API Token
+1. Go to ClickUp Settings → Apps
+2. Generate a new API token
+3. Copy the token to your `.env` file
+
+#### Get List and Folder IDs
+1. **Backlog List ID**: Right-click your backlog list → Copy link → Extract ID from URL
+2. **Folder ID**: Right-click your sprint folder → Copy link → Extract ID from URL
+3. **Team ID**: Go to team settings → Copy team ID
+
+### Discord Bot Setup
+1. Create a new application at https://discord.com/developers/applications
+2. Create a bot user and copy the token
+3. Invite bot with necessary permissions:
+   - Send Messages
+   - Read Message History
+   - Use Slash Commands
+   - Embed Links
+   - Add Reactions
+
+## Troubleshooting 🔧
+
+### Docker Issues
+
+#### Container won't start
+```bash
+# Check logs
+./docker-run.sh logs
+
+# Check environment variables
+docker-compose config
+
+# Rebuild image
+./docker-run.sh clean
+./docker-run.sh build
+./docker-run.sh run
+```
+
+#### Health check fails
+```bash
+# Check Discord API connectivity
+docker exec discord-clickup-bot python -c "import requests; print(requests.get('https://discord.com/api/v10/gateway').status_code)"
+
+# Check bot logs for connection issues
+./docker-run.sh logs
+```
+
+### Common Issues
+
+#### Bot doesn't respond to mentions
+- Check Discord permissions (Read Messages, Send Messages)
+- Verify bot token is correct
+- Ensure `message_content` intent is enabled
+
+#### ClickUp connection fails
+```bash
+# Test connection (if running locally)
+python test_clickup.py
+
+# In Docker
+docker exec discord-clickup-bot python test_clickup.py
+```
+- Verify API token has proper permissions
+- Check list and folder IDs are correct
+- Ensure team ID matches your workspace
+
+#### AI features not working
+- Verify OpenAI API key is valid and has credits
+- Check API key permissions for GPT-4o model
+- Bot will fallback to basic features without OpenAI
+
+### Debug Commands
+```bash
+# Bot commands
+!status                   # Check all connections and configuration
+!health                   # Simple ping test
+!lists                    # Show available sprint lists
+!tasks                    # Show tasks in current sprint
+
+# Docker commands
+./docker-run.sh status    # Container status and health
+./docker-run.sh logs      # Real-time logs
+docker stats              # Resource usage
+```
+
+## Monitoring and Maintenance 📊
+
+### Log Management
+```bash
+# View live logs
+./docker-run.sh logs
+
+# Log files are stored in ./logs/ directory
+ls -la logs/
+
+# Logs are automatically rotated (max 10MB, 3 files)
+```
+
+### Health Monitoring
+```bash
+# Check health status
+./docker-run.sh status
+
+# Manual health check
+docker exec discord-clickup-bot python -c "import requests; requests.get('https://discord.com/api/v10/gateway', timeout=5)"
+```
+
+### Updates and Maintenance
+```bash
+# Update bot code and restart
+./docker-run.sh update
+
+# Clean up old Docker resources
+./docker-run.sh clean
+
+# Full rebuild
+docker system prune -a
+./docker-run.sh build
+./docker-run.sh run
+```
+
+## Advanced Configuration ⚙️
+
+### Custom Docker Settings
+
+Edit `docker-compose.yml` for custom configuration:
+
+```yaml
+# Resource limits
+deploy:
+  resources:
+    limits:
+      memory: 1G      # Increase for heavy usage
+      cpus: '1.0'
+    reservations:
+      memory: 512M
+      cpus: '0.5'
+
+# Environment overrides
+environment:
+  - PYTHONUNBUFFERED=1
+  - LOG_LEVEL=DEBUG
+```
+
+### Scaling and Load Balancing
+```bash
+# Run multiple instances
+docker-compose up --scale discord-bot=3
+
+# Or use Docker Swarm for production
+docker swarm init
+docker stack deploy -c docker-compose.yml discord-bot-stack
+```
+
+## Security Best Practices 🔒
+
+1. **Environment Variables**: Never commit `.env` to version control
+2. **Token Rotation**: Regularly rotate API tokens
+3. **Container Security**: Bot runs as non-root user
+4. **Network Isolation**: Use Docker networks for service isolation
+5. **Resource Limits**: Set memory and CPU limits
+6. **Log Security**: Ensure logs don't contain sensitive information
+
+## Contributing 🤝
+
+Feel free to submit issues, feature requests, or pull requests to improve the bot's functionality.
+
+## License 📄
+
+This project is part of the legalgpt-django workspace and follows the same licensing terms.
