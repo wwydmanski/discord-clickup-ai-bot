@@ -250,6 +250,7 @@ async def generate_smart_title(task_content: str, relevant_context: List[str]) -
         - Keep titles under 60 characters
         - Make them actionable (start with verbs when possible)
         - Be specific and clear
+        - The name of the task must be generic - if user sends an error message, the title has to be generalized
         - Focus on the main action or deliverable
         - Don't include "Discord Task:" prefix
         - Use the relevant context to make the title more specific and accurate
@@ -500,10 +501,10 @@ def normalize_status(status_input: str) -> Optional[str]:
         "complete": "complete",
         "completed": "complete",
         "finished": "complete",
-        "close": "closed",
-        "closed": "closed",
-        "resolved": "closed",
-        "fixed": "closed"
+        "close": "complete",
+        "closed": "complete",
+        "resolved": "complete",
+        "fixed": "complete"
     }
     
     normalized = status_input.lower().strip()
