@@ -412,4 +412,4 @@ Feel free to submit issues, feature requests, or pull requests to improve the bo
 
 ## License 📄
 
-This project is part of the legalgpt-django workspace and follows the same licensing terms.
+This project is MIT-licensed.

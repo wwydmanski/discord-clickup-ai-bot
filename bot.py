@@ -161,7 +161,7 @@ clickup_client = ClickUpClient(
     api_token=os.getenv('CLICKUP_API_TOKEN'),
     list_id=os.getenv('CLICKUP_LIST_ID'),  # Backlog list
     team_id=os.getenv('CLICKUP_TEAM_ID'),
-    folder_id=os.getenv('CLICKUP_FOLDER_ID', '90155097400')  # Sprint folder
+    folder_id=os.getenv('CLICKUP_FOLDER_ID')  # Sprint folder
 )
 
 async def get_channel_context(channel, limit: int = 20) -> List[str]:
