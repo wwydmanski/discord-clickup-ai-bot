@@ -353,6 +353,158 @@ async def on_message(message):
     if not message.content.startswith(bot.command_prefix) and bot.user in message.mentions:
         await handle_task_creation(message)
 
+async def is_task_creation_command(content: str) -> bool:
+    """Use AI to determine if the message is a command to create a task rather than a task description"""
+    content_cleaned = content.strip()
+    
+    # Handle empty content
+    if not content_cleaned:
+        return False
+    
+    # Quick heuristic for very obvious task descriptions (performance optimization)
+    # If message is long and technical, it's likely a task description
+    if len(content_cleaned.split()) > 10 and any(word in content_cleaned.lower() for word in ['implement', 'fix', 'create', 'update', 'review', 'add', 'remove', 'delete', 'bug', 'feature', 'system', 'api', 'database', 'interface']):
+        return False
+    
+    # Use AI for intent analysis
+    if not openai.api_key:
+        logger.warning("OpenAI API key not available, falling back to simple heuristics")
+        # Simple fallback: very short messages with task-related words are likely commands
+        simple_command_words = ['task', 'taska', 'zadanie', 'backlog']
+        return len(content_cleaned.split()) <= 3 and any(word in content_cleaned.lower() for word in simple_command_words)
+    
+    try:
+        system_prompt = """You are an intent classifier for a Discord bot that creates tasks. Your job is to determine whether a user's message is:
+
+1. A COMMAND to create a task (user wants bot to analyze context and create a task)
+2. A TASK DESCRIPTION (user directly describes what the task should be about)
+
+COMMAND examples:
+- "dodaj taska" (Polish: add a task)
+- "create task"
+- "task this"
+- "wrzuć do backlog" (Polish: put in backlog)
+- "zapisz to" (Polish: save this)
+- "task z tego" (Polish: task from this)
+- "możesz stworzyć task?" (Polish: can you create a task?)
+- "task please"
+- "backlog this"
+
+TASK DESCRIPTION examples:
+- "Fix login bug with special characters"
+- "Implement user authentication system"
+- "Review the new authentication system"
+- "Update API documentation"
+- "Create tests for payment module"
+
+Rules:
+- If user is asking the bot to create a task without specifying what it should be about = COMMAND
+- If user is directly describing what needs to be done = TASK DESCRIPTION
+- Commands often contain meta-language about task creation
+- Task descriptions contain specific technical details, actions, or deliverables
+- Consider both Polish and English expressions
+- When in doubt, lean towards TASK DESCRIPTION
+
+Respond with only "COMMAND" or "TASK_DESCRIPTION"."""
+
+        user_prompt = f'Analyze this message: "{content_cleaned}"'
+
+        response = openai.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            max_tokens=10,
+            temperature=0.1
+        )
+        
+        result = response.choices[0].message.content.strip().upper()
+        
+        is_command = result == "COMMAND"
+        logger.info(f"AI intent analysis: '{content_cleaned}' -> {result} -> {'COMMAND' if is_command else 'TASK_DESCRIPTION'}")
+        
+        return is_command
+        
+    except Exception as e:
+        logger.error(f"Error in AI intent analysis: {e}")
+        # Fallback to simple heuristics
+        simple_command_words = ['task', 'taska', 'zadanie', 'backlog', 'dodaj', 'stwórz', 'create', 'add']
+        is_simple_command = len(content_cleaned.split()) <= 5 and any(word in content_cleaned.lower() for word in simple_command_words)
+        logger.info(f"Fallback heuristic: '{content_cleaned}' -> {'COMMAND' if is_simple_command else 'TASK_DESCRIPTION'}")
+        return is_simple_command
+
+async def extract_task_from_context(message, command_content: str) -> tuple[str, str]:
+    """Extract task information from channel context when a command is detected"""
+    logger.info(f"Command detected: '{command_content}' - analyzing context for task content")
+    
+    # Get recent channel messages for context
+    all_channel_messages = await get_channel_context(message.channel, limit=15)
+    
+    # Use AI to determine what task should be created from the context
+    if not openai.api_key:
+        logger.warning("OpenAI API key not available, using fallback method")
+        return "Task from conversation context", "No AI analysis available"
+    
+    try:
+        # Prepare context for AI analysis
+        context_text = ""
+        if all_channel_messages:
+            context_text = "\n".join([
+                f"{msg}" for msg in all_channel_messages
+            ])
+        
+        system_prompt = """You are a smart task creation assistant. The user mentioned a bot with a command to create a task, but didn't specify what the task should be about. You need to analyze the recent conversation context to determine what task should be created.
+
+Rules:
+1. Look at the recent conversation context to understand what needs to be done
+2. Create a clear, actionable task title and description
+3. Focus on the most recent discussion topics or issues mentioned
+4. If there are multiple possible tasks, pick the most recent or urgent one
+5. If the context doesn't provide clear task material, create a task about following up on the discussion
+
+Return your response in this format:
+TITLE: [Clear, actionable task title]
+DESCRIPTION: [Brief description of what needs to be done based on context]"""
+
+        user_prompt = f"""The user said: "{command_content}"
+
+Recent conversation context:
+{context_text}
+
+What task should be created based on this context?"""
+
+        response = openai.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            max_tokens=300,
+            temperature=0.3
+        )
+        
+        ai_response = response.choices[0].message.content
+        logger.info(f"AI task analysis: {ai_response}")
+        
+        # Parse the AI response
+        lines = ai_response.split('\n')
+        title = "Task from conversation context"
+        description = command_content
+        
+        for line in lines:
+            if line.startswith('TITLE:'):
+                title = line.replace('TITLE:', '').strip()
+            elif line.startswith('DESCRIPTION:'):
+                description = line.replace('DESCRIPTION:', '').strip()
+        
+        return title, description
+        
+    except Exception as e:
+        logger.error(f"Error analyzing context with AI: {e}")
+        # Fallback: use command content
+        return "Task from conversation context", command_content
+
 async def handle_task_creation(message):
     """Handle creating a ClickUp task from a Discord message"""
     try:
@@ -369,21 +521,40 @@ async def handle_task_creation(message):
                 await message.reply("❌ Please provide a task description when mentioning me!")
                 return
             
+            # Check if this is a command to create a task vs. a task description
+            is_command = await is_task_creation_command(clean_content)
+            
+            if is_command:
+                # Extract task from context using AI
+                logger.info("Detected task creation command - analyzing context")
+                task_name, task_description_from_context = await extract_task_from_context(message, clean_content)
+                
+                # For commands, we use the AI-generated title directly and don't need additional title generation
+                final_task_name = task_name
+                task_input_content = task_description_from_context
+            else:
+                # This is a regular task description
+                task_input_content = clean_content
+                final_task_name = None  # Will be generated later
+            
             # Determine target list based on message content
             target_list_id, list_description = determine_target_list(clean_content)
             logger.info(f"Target list: {list_description} (ID: {target_list_id})")
             
-            # Get channel context for smarter title generation
+            # Get channel context for smarter title generation (if needed)
             logger.info("Getting channel context...")
             all_channel_messages = await get_channel_context(message.channel, limit=20)
             
             # Filter for relevant context using AI
             logger.info("Filtering relevant context with AI...")
-            relevant_context = await filter_relevant_context(clean_content, all_channel_messages)
+            relevant_context = await filter_relevant_context(task_input_content, all_channel_messages)
             
-            # Generate smart title using OpenAI with filtered context
-            logger.info("Generating smart title with relevant context...")
-            task_name = await generate_smart_title(clean_content, relevant_context)
+            # Generate smart title using OpenAI with filtered context (only if not already generated)
+            if final_task_name is None:
+                logger.info("Generating smart title with relevant context...")
+                final_task_name = await generate_smart_title(task_input_content, relevant_context)
+            else:
+                logger.info(f"Using AI-generated title from context analysis: {final_task_name}")
             
             # Prepare context summary for task description
             context_summary = ""
@@ -393,10 +564,16 @@ async def handle_task_creation(message):
             elif all_channel_messages:
                 context_summary = f"\n\n**Note:** AI found no relevant context in recent {len(all_channel_messages)} messages"
             
+            # Different description format for commands vs direct descriptions
+            if is_command:
+                original_message_section = f"**Command:** {clean_content}\n**Extracted from context:** {task_description_from_context}"
+            else:
+                original_message_section = f"**Original Message:** {clean_content}"
+            
             task_description = f"""
 **Task created from Discord**
 
-**Original Message:** {clean_content}
+{original_message_section}
 
 **Target List:** {list_description}
 **Author:** {message.author.display_name} ({message.author.name}#{message.author.discriminator})
@@ -407,9 +584,9 @@ async def handle_task_creation(message):
             """.strip()
             
             # Create the task in ClickUp
-            logger.info(f"Creating task with title: {task_name}")
+            logger.info(f"Creating task with title: {final_task_name}")
             task_response = clickup_client.create_task(
-                name=task_name,
+                name=final_task_name,
                 description=task_description,
                 list_id=target_list_id  # Will use backlog if None
             )
@@ -424,15 +601,22 @@ async def handle_task_creation(message):
             
             embed.add_field(
                 name="🤖 AI-Generated Title",
-                value=task_name,
+                value=final_task_name,
                 inline=False
             )
             
-            embed.add_field(
-                name="📝 Original Message",
-                value=clean_content[:100] + ("..." if len(clean_content) > 100 else ""),
-                inline=False
-            )
+            if is_command:
+                embed.add_field(
+                    name="📝 Command Detected",
+                    value=f"Command: `{clean_content}`\nExtracted from context: {task_description_from_context[:100]}{'...' if len(task_description_from_context) > 100 else ''}",
+                    inline=False
+                )
+            else:
+                embed.add_field(
+                    name="📝 Original Message",
+                    value=clean_content[:100] + ("..." if len(clean_content) > 100 else ""),
+                    inline=False
+                )
             
             # Add context analysis info
             if relevant_context:
@@ -467,7 +651,8 @@ async def handle_task_creation(message):
             
             # Add routing info in footer
             routing_info = "📋 Backlog" if "backlog" in clean_content.lower() else "🚀 Current Sprint"
-            embed.set_footer(text=f"ClickUp Discord Bot • AI Context Analysis • Routed to: {routing_info}")
+            creation_method = "🎯 Smart Command" if is_command else "📝 Direct Description"
+            embed.set_footer(text=f"ClickUp Discord Bot • {creation_method} • Routed to: {routing_info}")
             
             await message.reply(embed=embed)
             
@@ -636,7 +821,7 @@ async def update_command(ctx, *, args=None):
         )
         embed.add_field(
             name="Examples",
-            value="`!update integracja bota z clickupem review`\n`!update fix login bug in progress`\n`!update dokumentacja api closed`",
+            value="`!update integracja bota review`\n`!update fix login bug in progress`\n`!update dokumentacja api closed`",
             inline=False
         )
         embed.add_field(

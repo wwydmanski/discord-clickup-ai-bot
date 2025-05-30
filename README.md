@@ -35,6 +35,29 @@ Simply mention the bot with your task description:
 @bot Fix login bug with special characters
 ```
 
+#### Smart Command Detection
+The bot uses AI to intelligently recognize when you're giving it a command vs. describing a task:
+```
+# Commands - Bot analyzes conversation context:
+@bot dodaj taska             # AI recognizes: command to create task
+@bot wrzuć to do backlog     # AI recognizes: command to add to backlog 
+@bot task z tego             # AI recognizes: command to create from context
+@bot create task             # AI recognizes: direct command
+@bot save this as a task     # AI recognizes: natural language command
+@bot can you make a task?    # AI recognizes: polite request command
+
+# Task descriptions - Used directly:
+@bot Implement user authentication system    # AI recognizes: specific task
+@bot Fix bug with password validation        # AI recognizes: specific task
+@bot Review API documentation               # AI recognizes: specific task
+```
+
+**Key Benefits:**
+- **Natural Language**: No need to memorize specific phrases
+- **Multilingual**: Works with Polish and English expressions
+- **Context-Aware**: Understands intent, not just keywords
+- **Flexible**: Recognizes various ways of expressing the same intent
+
 #### Update Tasks
 Use semantic matching to find and update existing tasks:
 ```
@@ -237,11 +260,20 @@ docker-compose -f docker-compose.prod.yml up -d
 
 ### Task Creation Process
 1. **Mention Detection**: Bot detects when it's mentioned in a message
-2. **Content Extraction**: Extracts task description from the message
-3. **Context Analysis**: AI analyzes recent channel messages for relevance
-4. **List Routing**: Determines target list based on "backlog" keyword
-5. **Title Generation**: AI creates actionable task title using context
-6. **Task Creation**: Creates task in ClickUp with rich description
+2. **Command Analysis**: AI determines if mention is a command vs. task description
+3. **Context Extraction**: For commands, analyzes recent conversation for task content
+4. **Content Processing**: Extracts or generates task description based on type
+5. **Context Analysis**: AI analyzes recent channel messages for relevance
+6. **List Routing**: Determines target list based on "backlog" keyword
+7. **Title Generation**: AI creates actionable task title using context
+8. **Task Creation**: Creates task in ClickUp with rich description
+
+### Smart Command Detection
+1. **AI Intent Analysis**: Uses OpenAI to understand user intent from natural language
+2. **Context Analysis**: When command detected, analyzes recent channel messages
+3. **Task Extraction**: AI determines what task should be created from conversation
+4. **Intelligent Processing**: No predefined phrases needed - understands various expressions
+5. **Fallback System**: Simple heuristics when OpenAI is unavailable
 
 ### Task Update Process
 1. **Command Parsing**: Extracts task description and desired status
