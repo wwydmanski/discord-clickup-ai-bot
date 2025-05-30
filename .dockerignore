@@ -64,4 +64,6 @@ Thumbs.db
 
 # Temporary files
 *.tmp
-*.temp 
+*.temp
+
+# Note: src/ directory should be included in Docker build 

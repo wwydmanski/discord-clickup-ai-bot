@@ -78,7 +78,24 @@ The bot accepts various status formats and automatically normalizes them:
 - ClickUp API Token
 - OpenAI API Key (recommended for AI features)
 
-### 2. Quick Start with Docker (Recommended) 🐳
+### 2. Project Structure
+```
+discord-bot/
+├── src/                    # Source code
+│   ├── bot.py             # Main bot application
+│   ├── run.py             # Development runner
+│   ├── test_clickup.py    # ClickUp API testing
+│   └── minimal_test.py    # Basic functionality tests
+├── Dockerfile             # Docker configuration
+├── docker-compose.yml     # Docker Compose setup
+├── docker-run.sh          # Docker management script
+├── requirements.txt       # Python dependencies
+├── env.example            # Environment template
+├── .dockerignore          # Docker ignore patterns
+└── README.md              # This file
+```
+
+### 3. Quick Start with Docker (Recommended) 🐳
 
 #### Step 1: Clone and Configure
 ```bash
@@ -108,7 +125,7 @@ chmod +x docker-run.sh
 ./docker-run.sh restart
 ```
 
-### 3. Docker Management Commands
+### 4. Docker Management Commands
 
 The `docker-run.sh` script provides easy management:
 
@@ -124,7 +141,7 @@ The `docker-run.sh` script provides easy management:
 ./docker-run.sh help       # Show help
 ```
 
-### 4. Manual Docker Commands
+### 5. Manual Docker Commands
 
 If you prefer manual Docker management:
 
@@ -142,7 +159,7 @@ docker-compose logs -f discord-bot
 docker-compose down
 ```
 
-### 5. Local Development Setup
+### 6. Local Development Setup
 
 For local development without Docker:
 
@@ -151,10 +168,10 @@ For local development without Docker:
 pip install -r requirements.txt
 
 # Run the bot
-python bot.py
+python src/bot.py
 
 # Or use the runner script
-python run.py
+python src/run.py
 ```
 
 ## Environment Configuration 🔧
@@ -183,7 +200,7 @@ OPENAI_API_KEY=your_openai_api_key_here
 | `CLICKUP_API_TOKEN` | ✅ | ClickUp API authentication token | - |
 | `CLICKUP_LIST_ID` | ✅ | Default backlog list ID | - |
 | `CLICKUP_TEAM_ID` | ✅ | ClickUp team/workspace ID | - |
-| `CLICKUP_FOLDER_ID` | ⚠️ | Sprint folder ID for current sprint lists | `90155097400` |
+| `CLICKUP_FOLDER_ID` | ⚠️ | Sprint folder ID for current sprint lists | - |
 | `OPENAI_API_KEY` | ⚠️ | OpenAI API key for AI features | - |
 
 ## Docker Configuration Details 🐳
@@ -300,10 +317,10 @@ docker exec discord-clickup-bot python -c "import requests; print(requests.get('
 #### ClickUp connection fails
 ```bash
 # Test connection (if running locally)
-python test_clickup.py
+python src/test_clickup.py
 
 # In Docker
-docker exec discord-clickup-bot python test_clickup.py
+docker exec discord-clickup-bot python src/test_clickup.py
 ```
 - Verify API token has proper permissions
 - Check list and folder IDs are correct

@@ -14,8 +14,8 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
-COPY . .
+# Copy source code
+COPY src/ ./src/
 
 # Create non-root user for security
 RUN useradd --create-home --shell /bin/bash app \
@@ -27,4 +27,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import requests; requests.get('https://discord.com/api/v10/gateway', timeout=5)" || exit 1
 
 # Run the bot
-CMD ["python", "bot.py"] 
+CMD ["python", "src/bot.py"] 
