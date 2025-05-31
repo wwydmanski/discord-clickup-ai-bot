@@ -804,46 +804,165 @@ Which task number is most similar? Return only the number or "none":"""
         logger.error(f"Error finding similar task: {e}")
         return None
 
-async def match_member_by_name(name_query: str, members: List[discord.Member]) -> Optional[discord.Member]:
-    """Use AI to match an approximate name to a guild member"""
-    if not members:
+async def match_member_by_name(name_query: str, clickup_members: List[dict]) -> Optional[dict]:
+    """Use AI to match an approximate name to a ClickUp team member with advanced semantic matching"""
+    if not clickup_members:
         return None
 
-    # Fallback to simple substring search when OpenAI is unavailable
+    name_query_lower = name_query.lower().strip()
+    
+    # Fallback to enhanced substring search when OpenAI is unavailable
     if not openai.api_key:
-        for member in members:
-            if name_query.lower() in member.display_name.lower() or name_query.lower() in member.name.lower():
+        logger.info(f"Using fallback matching for '{name_query}'")
+        
+        # Try different matching strategies
+        for member in clickup_members:
+            user = member.get('user', {})
+            username = user.get('username', '').lower()
+            email = user.get('email', '').lower()
+            
+            # Strategy 1: Exact substring match
+            if (name_query_lower in username or 
+                name_query_lower in email):
+                logger.info(f"Exact substring match: '{name_query}' → '{username}'")
                 return member
+            
+            # Strategy 2: Split username by dots/underscores and check fragments
+            username_parts = username.replace('.', ' ').replace('_', ' ').replace('-', ' ').split()
+            for part in username_parts:
+                if name_query_lower in part or part in name_query_lower:
+                    logger.info(f"Fragment match: '{name_query}' → '{username}' (matched part: '{part}')")
+                    return member
+            
+            # Strategy 3: Split email by @ and check username part
+            email_username = email.split('@')[0] if '@' in email else email
+            email_parts = email_username.replace('.', ' ').replace('_', ' ').replace('-', ' ').split()
+            for part in email_parts:
+                if name_query_lower in part or part in name_query_lower:
+                    logger.info(f"Email fragment match: '{name_query}' → '{email}' (matched part: '{part}')")
+                    return member
+        
+        # Strategy 4: Fuzzy matching - check if query starts with any part or vice versa
+        for member in clickup_members:
+            user = member.get('user', {})
+            username = user.get('username', '').lower()
+            email = user.get('email', '').lower()
+            
+            # Check if query is a prefix of any part
+            all_parts = []
+            all_parts.extend(username.replace('.', ' ').replace('_', ' ').replace('-', ' ').split())
+            if '@' in email:
+                all_parts.extend(email.split('@')[0].replace('.', ' ').replace('_', ' ').replace('-', ' ').split())
+            
+            for part in all_parts:
+                if part.startswith(name_query_lower) or name_query_lower.startswith(part):
+                    logger.info(f"Prefix/suffix match: '{name_query}' → '{username}' (matched part: '{part}')")
+                    return member
+        
+        logger.info(f"No fallback match found for '{name_query}'")
         return None
 
+    # AI-powered semantic matching
     try:
-        name_list = "\n".join([f"{i+1}. {m.display_name}" for i, m in enumerate(members)])
-        system_prompt = (
-            "You are a helpful assistant that matches a provided name to the best discord user from a list. "
-            "Return only the number of the best match or 'none' if no good match."
-        )
-        user_prompt = (
-            f"Available users:\n{name_list}\n\n"
-            f"Find the best match for '{name_query}'. Return the number or 'none'."
-        )
+        # Create detailed name list from ClickUp members
+        name_list = []
+        for i, member in enumerate(clickup_members):
+            user = member.get('user', {})
+            username = user.get('username', 'Unknown')
+            email = user.get('email', '')
+            
+            # Create a comprehensive description for AI
+            display_name = f"{username}"
+            if email:
+                display_name += f" ({email})"
+            
+            # Add alternative representations
+            username_variants = []
+            if '.' in username:
+                username_variants.append(username.replace('.', ' '))
+            if '_' in username:
+                username_variants.append(username.replace('_', ' '))
+            if '-' in username:
+                username_variants.append(username.replace('-', ' '))
+            
+            full_description = display_name
+            if username_variants:
+                full_description += f" [variants: {', '.join(username_variants)}]"
+            
+            name_list.append(f"{i+1}. {full_description}")
+        
+        name_list_text = "\n".join(name_list)
+        
+        system_prompt = """You are an expert at matching names and usernames. Given a partial name or nickname, find the best matching ClickUp team member.
+
+Matching rules:
+- Look for exact matches first
+- Then check for partial matches (e.g., "kowal" matches "jan.kowalski")
+- Consider common name variations (dots, underscores, dashes)
+- Match fragments of usernames or emails
+- Consider both first name and last name parts
+- Be flexible with partial queries (e.g., "john" can match "john.doe" or "johnsmith")
+- If multiple matches are possible, prefer the most specific/exact match
+
+Examples:
+- "kowal" → "jan.kowalski" (partial last name)
+- "john" → "john.doe" (first name)
+- "smith" → "johnsmith" or "john.smith" (last name part)
+- "jdoe" → "john.doe" (username pattern)
+
+Return only the number of the best match or 'none' if no reasonable match exists."""
+
+        user_prompt = f"""Find the best match for the query: "{name_query}"
+
+Available ClickUp team members:
+{name_list_text}
+
+Which member number matches best? Return only the number (e.g., "3") or "none":"""
 
         response = openai.chat.completions.create(
             model="gpt-4o",
-            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
-            max_tokens=10,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            max_tokens=20,
             temperature=0.1,
         )
+        
         result = response.choices[0].message.content.strip().lower()
+        
         if result == "none":
+            logger.info(f"AI found no match for '{name_query}'")
             return None
 
-        index = int(result) - 1
-        if 0 <= index < len(members):
-            return members[index]
+        try:
+            index = int(result) - 1
+            if 0 <= index < len(clickup_members):
+                matched_member = clickup_members[index]
+                matched_username = matched_member.get('user', {}).get('username', 'Unknown')
+                logger.info(f"AI matched '{name_query}' → '{matched_username}'")
+                return matched_member
+            else:
+                logger.warning(f"AI returned invalid index: {result}")
+                return None
+                
+        except ValueError:
+            logger.warning(f"Could not parse AI response: {result}")
+            return None
+        
     except Exception as e:
-        logger.error(f"Error matching member name: {e}")
-
-    return None
+        logger.error(f"Error in AI semantic matching: {e}")
+        # Fall back to simple search if AI fails
+        for member in clickup_members:
+            user = member.get('user', {})
+            username = user.get('username', '').lower()
+            email = user.get('email', '').lower()
+            
+            if (name_query_lower in username or name_query_lower in email):
+                logger.info(f"Emergency fallback match: '{name_query}' → '{username}'")
+                return member
+        
+        return None
 
 def parse_update_command(command_text: str) -> tuple[Optional[str], Optional[str]]:
     """Parse !update command to extract task description and status
@@ -1003,46 +1122,6 @@ async def update_command(interaction: discord.Interaction, task_description: str
 
         await interaction.followup.send(embed=error_embed)
 
-
-@bot.tree.command(name="assign", description="Assign a user to a task using AI name matching")
-@app_commands.describe(task_description="Description of the task to match", member_name="Approximate member name")
-async def assign_command(interaction: discord.Interaction, task_description: str, member_name: str):
-    """Assign a Discord member to the most similar ClickUp task"""
-    await interaction.response.defer()
-
-    try:
-        tasks = clickup_client.get_tasks_from_newest_sprint()
-        if not tasks:
-            await interaction.followup.send("❌ No tasks found in the newest sprint list")
-            return
-
-        similar_task = await find_similar_task(task_description, tasks)
-        if not similar_task:
-            await interaction.followup.send(f"❌ Could not find a task similar to: '{task_description}'")
-            return
-
-        member = await match_member_by_name(member_name, interaction.guild.members)
-        if not member:
-            await interaction.followup.send(f"❌ Could not find a member matching '{member_name}'")
-            return
-
-        clickup_client.assign_task(similar_task['id'], str(member.id))
-
-        embed = discord.Embed(
-            title="✅ Task Assigned",
-            description=f"Assigned **{member.display_name}** to **{similar_task.get('name')}**",
-            color=discord.Color.green(),
-            timestamp=datetime.utcnow(),
-        )
-        if 'url' in similar_task:
-            embed.add_field(name="🔗 Task URL", value=f"[View in ClickUp]({similar_task['url']})", inline=False)
-
-        await interaction.followup.send(embed=embed)
-
-    except Exception as e:
-        logger.error(f"Error assigning task: {e}")
-        await interaction.followup.send(f"❌ Error assigning task: {e}")
-
 @bot.tree.command(name="tasks", description="Show all tasks from newest sprint list")
 async def tasks_command(interaction: discord.Interaction):
     """Show all tasks from newest sprint list"""
@@ -1132,7 +1211,7 @@ async def help_command(interaction: discord.Interaction):
     
     embed.add_field(
         name="⚡ Commands",
-        value="`/help` - Show this help message\n`/update` - Update task status with AI matching\n`/tasks` - Show tasks in newest sprint\n`/status` - Check bot status\n`/health` - Simple health check\n`/lists` - Show available lists\n`/assign` - Assign user to task",
+        value="`/help` - Show this help message\n`/update` - Update task status with AI matching\n`/tasks` - Show tasks in newest sprint\n`/assign` - Assign ClickUp user to task\n`/match` - Test member name matching\n`/members` - Show ClickUp team members\n`/status` - Check bot status\n`/health` - Simple health check\n`/lists` - Show available lists",
         inline=False
     )
     
@@ -1144,7 +1223,7 @@ async def help_command(interaction: discord.Interaction):
     
     embed.add_field(
         name="🧠 AI Features",
-        value="• Smart title generation using OpenAI\n• Semantic task matching\n• Channel context analysis\n• Intelligent list routing",
+        value="• Smart title generation using OpenAI\n• Semantic task matching\n• Channel context analysis\n• Intelligent list routing\n• ClickUp team member matching",
         inline=False
     )
     
@@ -1258,6 +1337,141 @@ async def lists_command(interaction: discord.Interaction):
         logger.error(f"Error getting lists: {e}")
         await interaction.followup.send(f"❌ Error getting lists: {e}")
 
+@bot.tree.command(name="match", description="Test member name matching without assigning")
+@app_commands.describe(member_name="Name or partial name to match")
+async def match_command(interaction: discord.Interaction, member_name: str):
+    """Test ClickUp member name matching"""
+    await interaction.response.defer()
+
+    try:
+        # Get ClickUp team members
+        logger.info(f"Testing member matching for: '{member_name}'")
+        clickup_members = clickup_client.get_team_members()
+        if not clickup_members:
+            await interaction.followup.send("❌ Could not retrieve ClickUp team members. Make sure CLICKUP_TEAM_ID is configured.")
+            return
+
+        # Test the matching
+        matched_member = await match_member_by_name(member_name, clickup_members)
+        
+        embed = discord.Embed(
+            title="🔍 Member Matching Test",
+            color=discord.Color.blue(),
+            timestamp=datetime.utcnow()
+        )
+        
+        embed.add_field(
+            name="🔎 Search Query",
+            value=f"`{member_name}`",
+            inline=False
+        )
+        
+        if matched_member:
+            user = matched_member.get('user', {})
+            username = user.get('username', 'Unknown')
+            email = user.get('email', 'No email')
+            member_id = user.get('id', 'Unknown')
+            
+            embed.color = discord.Color.green()
+            embed.add_field(
+                name="✅ Match Found",
+                value=f"**Username:** {username}\n**Email:** {email}\n**ID:** `{member_id}`",
+                inline=False
+            )
+            
+            # Show matching details
+            if openai.api_key:
+                embed.add_field(
+                    name="🧠 Matching Method",
+                    value="AI Semantic Matching",
+                    inline=True
+                )
+            else:
+                embed.add_field(
+                    name="🔧 Matching Method", 
+                    value="Fallback Algorithm",
+                    inline=True
+                )
+        else:
+            embed.color = discord.Color.red()
+            embed.add_field(
+                name="❌ No Match Found",
+                value="Could not find a ClickUp team member matching your query.",
+                inline=False
+            )
+            
+            # Show available alternatives
+            if len(clickup_members) <= 5:
+                alternatives = []
+                for member in clickup_members:
+                    user = member.get('user', {})
+                    alternatives.append(user.get('username', 'Unknown'))
+                
+                embed.add_field(
+                    name="💡 Available Members",
+                    value="\n".join([f"• `{name}`" for name in alternatives]),
+                    inline=False
+                )
+        
+        embed.add_field(
+            name="📊 Stats",
+            value=f"Searched in {len(clickup_members)} team members",
+            inline=True
+        )
+        
+        embed.set_footer(text="Use /assign to actually assign a task")
+        await interaction.followup.send(embed=embed)
+
+    except Exception as e:
+        logger.error(f"Error testing member matching: {e}")
+        await interaction.followup.send(f"❌ Error testing member matching: {e}")
+
+@bot.tree.command(name="members", description="Show ClickUp team members")
+async def members_command(interaction: discord.Interaction):
+    """Show ClickUp team members"""
+    try:
+        await interaction.response.defer()
+        members = clickup_client.get_team_members()
+        
+        if not members:
+            await interaction.followup.send("❌ No team members found. Make sure CLICKUP_TEAM_ID is configured.")
+            return
+        
+        embed = discord.Embed(
+            title="👥 ClickUp Team Members",
+            description=f"Found {len(members)} team members:",
+            color=discord.Color.blue()
+        )
+        
+        # Limit to 15 members for display
+        display_members = members[:15]
+        
+        for i, member in enumerate(display_members):
+            user = member.get('user', {})
+            username = user.get('username', 'Unknown')
+            email = user.get('email', 'No email')
+            member_id = user.get('id', 'Unknown')
+            
+            embed.add_field(
+                name=f"👤 {username}",
+                value=f"Email: {email}\nID: `{member_id}`",
+                inline=True
+            )
+        
+        if len(members) > 15:
+            embed.add_field(
+                name="⚠️ Note",
+                value=f"Showing first 15 of {len(members)} members",
+                inline=False
+            )
+        
+        embed.set_footer(text="Use these names with /assign command")
+        await interaction.followup.send(embed=embed)
+        
+    except Exception as e:
+        logger.error(f"Error getting team members: {e}")
+        await interaction.followup.send(f"❌ Error getting team members: {e}")
+
 @bot.tree.command(name="health", description="Simple health check")
 async def health_command(interaction: discord.Interaction):
     """Simple health check command"""
@@ -1267,7 +1481,7 @@ def main():
     """Main function to run the bot"""
     # Check required environment variables
     required_vars = ['DISCORD_BOT_TOKEN', 'CLICKUP_API_TOKEN', 'CLICKUP_LIST_ID']
-    recommended_vars = ['OPENAI_API_KEY', 'CLICKUP_FOLDER_ID']
+    recommended_vars = ['OPENAI_API_KEY', 'CLICKUP_FOLDER_ID', 'CLICKUP_TEAM_ID']
     
     missing_vars = [var for var in required_vars if not os.getenv(var)]
     missing_recommended = [var for var in recommended_vars if not os.getenv(var)]
@@ -1289,4 +1503,4 @@ def main():
         logger.error(f"An error occurred: {e}")
 
 if __name__ == "__main__":
-    main() 
+    main()
