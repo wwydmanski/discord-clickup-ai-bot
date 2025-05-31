@@ -60,3 +60,17 @@ def test_update_task_status():
         assert result == {"status": "complete"}
         mock_put.assert_called_once()
         assert mock_put.call_args[0][0] == "https://api.clickup.com/api/v2/task/id1"
+
+
+def test_assign_task():
+    client = ClickUpClient("token", "list")
+    with patch("bot.requests.post") as mock_post:
+        mock_resp = Mock()
+        mock_resp.raise_for_status.return_value = None
+        mock_resp.json.return_value = {"assignee": "user"}
+        mock_post.return_value = mock_resp
+
+        result = client.assign_task("id1", "u1")
+        assert result == {"assignee": "user"}
+        mock_post.assert_called_once()
+        assert mock_post.call_args[0][0] == "https://api.clickup.com/api/v2/task/id1/assignee/u1"

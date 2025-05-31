@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import List, Optional
 
 import discord
+from discord import app_commands
 import openai
 import requests
 from discord.ext import commands
@@ -147,6 +148,20 @@ class ClickUpClient:
             return response.json()
         except requests.exceptions.RequestException as e:
             logger.error(f"Failed to update task status: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f"Response content: {e.response.text}")
+            raise
+
+    def assign_task(self, task_id: str, assignee_id: str) -> dict:
+        """Assign a user to a ClickUp task"""
+        url = f"{self.base_url}/task/{task_id}/assignee/{assignee_id}"
+
+        try:
+            response = requests.post(url, headers=self.headers)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to assign task: {e}")
             if hasattr(e, 'response') and e.response is not None:
                 logger.error(f"Response content: {e.response.text}")
             raise
@@ -320,6 +335,11 @@ async def on_ready():
     logger.info(f'{bot.user} has connected to Discord!')
     logger.info(f'Bot is in {len(bot.guilds)} guilds')
     logger.info(f"Registered commands: {[cmd.name for cmd in bot.commands]}")
+    try:
+        await bot.tree.sync()
+        logger.info("Slash commands synced")
+    except Exception as e:
+        logger.error(f"Error syncing commands: {e}")
     
     # Test folder connection
     lists = clickup_client.get_folder_lists()
@@ -766,6 +786,47 @@ Which task number is most similar? Return only the number or "none":"""
         logger.error(f"Error finding similar task: {e}")
         return None
 
+async def match_member_by_name(name_query: str, members: List[discord.Member]) -> Optional[discord.Member]:
+    """Use AI to match an approximate name to a guild member"""
+    if not members:
+        return None
+
+    # Fallback to simple substring search when OpenAI is unavailable
+    if not openai.api_key:
+        for member in members:
+            if name_query.lower() in member.display_name.lower() or name_query.lower() in member.name.lower():
+                return member
+        return None
+
+    try:
+        name_list = "\n".join([f"{i+1}. {m.display_name}" for i, m in enumerate(members)])
+        system_prompt = (
+            "You are a helpful assistant that matches a provided name to the best discord user from a list. "
+            "Return only the number of the best match or 'none' if no good match."
+        )
+        user_prompt = (
+            f"Available users:\n{name_list}\n\n"
+            f"Find the best match for '{name_query}'. Return the number or 'none'."
+        )
+
+        response = openai.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
+            max_tokens=10,
+            temperature=0.1,
+        )
+        result = response.choices[0].message.content.strip().lower()
+        if result == "none":
+            return None
+
+        index = int(result) - 1
+        if 0 <= index < len(members):
+            return members[index]
+    except Exception as e:
+        logger.error(f"Error matching member name: {e}")
+
+    return None
+
 def parse_update_command(command_text: str) -> tuple[Optional[str], Optional[str]]:
     """Parse !update command to extract task description and status
     
@@ -805,59 +866,30 @@ def parse_update_command(command_text: str) -> tuple[Optional[str], Optional[str
     
     return task_description, normalized_status
 
-@bot.command(name='update')
-async def update_command(ctx, *, args=None):
+@bot.tree.command(name="update", description="Update task status using AI semantic matching")
+@app_commands.describe(task_description="Task description to match", status="New task status")
+async def update_command(interaction: discord.Interaction, task_description: str, status: str):
     """Update task status using AI semantic matching"""
-    if not args:
+    await interaction.response.defer()
+
+    new_status = normalize_status(status)
+    if not new_status:
         embed = discord.Embed(
-            title="❌ Missing Arguments",
-            description="Please provide task description and status.",
+            title="❌ Invalid Status",
+            description="Please provide a valid status.",
             color=discord.Color.red()
         )
-        embed.add_field(
-            name="Usage",
-            value="`!update <task description> <status>`",
-            inline=False
-        )
-        embed.add_field(
-            name="Examples",
-            value="`!update integracja bota review`\n`!update fix login bug in progress`\n`!update dokumentacja api closed`",
-            inline=False
-        )
-        embed.add_field(
-            name="Valid Statuses",
-            value="`to do`, `in progress`, `in review`, `closed`",
-            inline=False
-        )
-        await ctx.send(embed=embed)
+        embed.add_field(name="Valid Statuses", value="`to do`, `in progress`, `in review`, `closed`", inline=False)
+        await interaction.followup.send(embed=embed)
         return
-    
-    # Parse the command
-    full_command = f"!update {args}"
-    task_description, new_status = parse_update_command(full_command)
-    
-    if not task_description or not new_status:
-        embed = discord.Embed(
-            title="❌ Invalid Command Format",
-            description="Could not parse task description and status.",
-            color=discord.Color.red()
-        )
-        embed.add_field(
-            name="Example",
-            value="`!update integracja bota review`",
-            inline=False
-        )
-        embed.add_field(
-            name="Valid Statuses",
-            value="`to do`, `in progress`, `in review`, `closed`",
-            inline=False
-        )
-        await ctx.send(embed=embed)
+
+    if not task_description:
+        await interaction.followup.send("❌ Please provide a task description")
         return
-    
+
     try:
         # Send typing indicator
-        async with ctx.typing():
+        async with interaction.channel.typing():
             # Get tasks from newest sprint
             logger.info(f"Looking for tasks similar to: '{task_description}' with status: '{new_status}'")
             tasks = clickup_client.get_tasks_from_newest_sprint()
@@ -868,7 +900,7 @@ async def update_command(ctx, *, args=None):
                     description="No tasks found in the newest sprint list.",
                     color=discord.Color.red()
                 )
-                await ctx.send(embed=embed)
+                await interaction.followup.send(embed=embed)
                 return
             
             logger.info(f"Found {len(tasks)} tasks in newest sprint")
@@ -884,10 +916,10 @@ async def update_command(ctx, *, args=None):
                 )
                 embed.add_field(
                     name="Available Tasks",
-                    value=f"Found {len(tasks)} tasks in newest sprint. Use `!tasks` to see all tasks.",
+                    value=f"Found {len(tasks)} tasks in newest sprint.",
                     inline=False
                 )
-                await ctx.send(embed=embed)
+                await interaction.followup.send(embed=embed)
                 return
             
             # Update task status
@@ -939,28 +971,69 @@ async def update_command(ctx, *, args=None):
                 )
             
             embed.set_footer(text="ClickUp Discord Bot • AI Task Matching")
-            await ctx.send(embed=embed)
-            
+            await interaction.followup.send(embed=embed)
+
     except Exception as e:
         logger.error(f"Error updating task: {e}")
-        
+
         error_embed = discord.Embed(
             title="❌ Error Updating Task",
             description=f"Sorry, I encountered an error: {str(e)}",
             color=discord.Color.red(),
             timestamp=datetime.utcnow()
         )
-        
-        await ctx.send(embed=error_embed)
 
-@bot.command(name='tasks')
-async def tasks_command(ctx):
+        await interaction.followup.send(embed=error_embed)
+
+
+@bot.tree.command(name="assign", description="Assign a user to a task using AI name matching")
+@app_commands.describe(task_description="Description of the task to match", member_name="Approximate member name")
+async def assign_command(interaction: discord.Interaction, task_description: str, member_name: str):
+    """Assign a Discord member to the most similar ClickUp task"""
+    await interaction.response.defer()
+
+    try:
+        tasks = clickup_client.get_tasks_from_newest_sprint()
+        if not tasks:
+            await interaction.followup.send("❌ No tasks found in the newest sprint list")
+            return
+
+        similar_task = await find_similar_task(task_description, tasks)
+        if not similar_task:
+            await interaction.followup.send(f"❌ Could not find a task similar to: '{task_description}'")
+            return
+
+        member = await match_member_by_name(member_name, interaction.guild.members)
+        if not member:
+            await interaction.followup.send(f"❌ Could not find a member matching '{member_name}'")
+            return
+
+        clickup_client.assign_task(similar_task['id'], str(member.id))
+
+        embed = discord.Embed(
+            title="✅ Task Assigned",
+            description=f"Assigned **{member.display_name}** to **{similar_task.get('name')}**",
+            color=discord.Color.green(),
+            timestamp=datetime.utcnow(),
+        )
+        if 'url' in similar_task:
+            embed.add_field(name="🔗 Task URL", value=f"[View in ClickUp]({similar_task['url']})", inline=False)
+
+        await interaction.followup.send(embed=embed)
+
+    except Exception as e:
+        logger.error(f"Error assigning task: {e}")
+        await interaction.followup.send(f"❌ Error assigning task: {e}")
+
+@bot.tree.command(name="tasks", description="Show all tasks from newest sprint list")
+async def tasks_command(interaction: discord.Interaction):
     """Show all tasks from newest sprint list"""
     try:
+        await interaction.response.defer()
         tasks = clickup_client.get_tasks_from_newest_sprint()
         
         if not tasks:
-            await ctx.send("❌ No tasks found in newest sprint list")
+            await interaction.followup.send("❌ No tasks found in newest sprint list")
             return
         
         # Get newest list info
@@ -994,14 +1067,14 @@ async def tasks_command(ctx):
                 inline=False
             )
         
-        await ctx.send(embed=embed)
+        await interaction.followup.send(embed=embed)
         
     except Exception as e:
         logger.error(f"Error getting tasks: {e}")
-        await ctx.send(f"❌ Error getting tasks: {e}")
+        await interaction.followup.send(f"❌ Error getting tasks: {e}")
 
-@bot.command(name='help')
-async def help_command(ctx):
+@bot.tree.command(name="help", description="Show help information")
+async def help_command(interaction: discord.Interaction):
     """Show help information"""
     embed = discord.Embed(
         title="🤖 ClickUp Discord Bot Help",
@@ -1023,13 +1096,13 @@ async def help_command(ctx):
     
     embed.add_field(
         name="🔄 Update Tasks",
-        value="Use `!update <task description> <status>` to find and update similar tasks using AI semantic matching.",
+        value="Use `/update` with task description and status to update similar tasks using AI semantic matching.",
         inline=False
     )
-    
+
     embed.add_field(
         name="🔄 Update Examples",
-        value="`!update integracja bota review`\n`!update fix login bug in progress`\n`!update dokumentacja api closed`",
+        value="`/update integracja bota review`\n`/update fix login bug in progress`\n`/update dokumentacja api closed`",
         inline=False
     )
     
@@ -1041,7 +1114,7 @@ async def help_command(ctx):
     
     embed.add_field(
         name="⚡ Commands",
-        value="`!help` - Show this help message\n`!update` - Update task status with AI matching\n`!tasks` - Show tasks in newest sprint\n`!status` - Check bot status\n`!health` - Simple health check\n`!lists` - Show available lists",
+        value="`/help` - Show this help message\n`/update` - Update task status with AI matching\n`/tasks` - Show tasks in newest sprint\n`/status` - Check bot status\n`/health` - Simple health check\n`/lists` - Show available lists\n`/assign` - Assign user to task",
         inline=False
     )
     
@@ -1058,10 +1131,10 @@ async def help_command(ctx):
     )
     
     embed.set_footer(text="ClickUp Discord Bot • Powered by OpenAI")
-    await ctx.send(embed=embed)
+    await interaction.response.send_message(embed=embed)
 
-@bot.command(name='status')
-async def status_command(ctx):
+@bot.tree.command(name="status", description="Check bot status")
+async def status_command(interaction: discord.Interaction):
     """Check bot status"""
     embed = discord.Embed(
         title="📊 Bot Status",
@@ -1111,16 +1184,17 @@ async def status_command(ctx):
         inline=True
     )
     
-    await ctx.send(embed=embed)
+    await interaction.response.send_message(embed=embed)
 
-@bot.command(name='lists')
-async def lists_command(ctx):
+@bot.tree.command(name="lists", description="Show available lists in sprint folder")
+async def lists_command(interaction: discord.Interaction):
     """Show available lists in sprint folder"""
     try:
+        await interaction.response.defer()
         lists = clickup_client.get_folder_lists()
         
         if not lists:
-            await ctx.send("❌ No lists found in sprint folder")
+            await interaction.followup.send("❌ No lists found in sprint folder")
             return
         
         embed = discord.Embed(
@@ -1160,16 +1234,16 @@ async def lists_command(ctx):
             )
         
         embed.set_footer(text="🚀 = Current target for new tasks (last list in order)")
-        await ctx.send(embed=embed)
+        await interaction.followup.send(embed=embed)
         
     except Exception as e:
         logger.error(f"Error getting lists: {e}")
-        await ctx.send(f"❌ Error getting lists: {e}")
+        await interaction.followup.send(f"❌ Error getting lists: {e}")
 
-@bot.command(name='health')
-async def health_command(ctx):
+@bot.tree.command(name="health", description="Simple health check")
+async def health_command(interaction: discord.Interaction):
     """Simple health check command"""
-    await ctx.send('🏓 ping')
+    await interaction.response.send_message('🏓 ping')
 
 def main():
     """Main function to run the bot"""
