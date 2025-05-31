@@ -6,8 +6,11 @@ Run this script to test your ClickUp setup before running the Discord bot.
 
 import os
 import sys
+import pytest
 from dotenv import load_dotenv
 from bot import ClickUpClient
+
+pytest.skip("manual integration script", allow_module_level=True)
 
 def test_clickup_connection():
     """Test the ClickUp API connection and create a test task"""
