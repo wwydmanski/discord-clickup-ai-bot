@@ -33,6 +33,24 @@ class ClickUpClient:
             "Authorization": api_token,
             "Content-Type": "application/json"
         }
+
+    def get_team_members(self) -> List[dict]:
+        """Get members of the ClickUp team"""
+        if not self.team_id:
+            return []
+
+        url = f"{self.base_url}/team/{self.team_id}/member"
+
+        try:
+            response = requests.get(url, headers=self.headers)
+            response.raise_for_status()
+            data = response.json()
+            return data.get("members", [])
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to get team members: {e}")
+            if hasattr(e, "response") and e.response is not None:
+                logger.error(f"Response content: {e.response.text}")
+            return []
     
     def get_folder_lists(self) -> List[dict]:
         """Get all lists from the specified folder"""
