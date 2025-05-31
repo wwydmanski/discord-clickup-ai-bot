@@ -46,13 +46,14 @@ def test_clickup_connection():
         if team_id:
             print("👥 Fetching team members...")
             members = client.get_team_members()
-            if members:
-                print(f"   Found {len(members)} team members")
+            count = len(members) if members else 0
+            if count:
+                print(f"   Found {count} team members")
                 for member in members[:3]:  # Show first 3 members
                     user = member.get('user', {})
                     print(f"   - {user.get('username', 'Unknown')} ({user.get('email', 'No email')})")
-                if len(members) > 3:
-                    print(f"   ... and {len(members) - 3} more")
+                if count > 3:
+                    print(f"   ... and {count - 3} more")
             else:
                 print("   No team members found or unable to fetch")
             print()
