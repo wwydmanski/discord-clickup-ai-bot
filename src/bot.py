@@ -13,12 +13,16 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging with optional environment override
+log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(level=getattr(logging, log_level, logging.INFO))
 logger = logging.getLogger(__name__)
 
 # Configure OpenAI
 openai.api_key = os.getenv('OPENAI_API_KEY')
+
+# Default number of recent messages to analyze for context
+CONTEXT_LIMIT = int(os.getenv("CONTEXT_LIMIT", "20"))
 
 class ClickUpClient:
     """Client for interacting with ClickUp API"""
@@ -33,6 +37,25 @@ class ClickUpClient:
             "Authorization": api_token,
             "Content-Type": "application/json"
         }
+
+    def get_team_members(self) -> List[dict]:
+        """Return members of the configured team"""
+        if not self.team_id:
+            logger.warning("Team ID not specified for ClickUp client")
+            return []
+
+        url = f"{self.base_url}/team/{self.team_id}/member"
+
+        try:
+            response = requests.get(url, headers=self.headers)
+            response.raise_for_status()
+            data = response.json()
+            return data.get("members", [])
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to get team members: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f"Response content: {e.response.text}")
+            return []
     
     def get_folder_lists(self) -> List[dict]:
         """Get all lists from the specified folder"""
@@ -164,7 +187,7 @@ clickup_client = ClickUpClient(
     folder_id=os.getenv('CLICKUP_FOLDER_ID')  # Sprint folder
 )
 
-async def get_channel_context(channel, limit: int = 20) -> List[str]:
+async def get_channel_context(channel, limit: int = CONTEXT_LIMIT) -> List[str]:
     """Get recent messages from channel for context"""
     try:
         messages = []
@@ -543,7 +566,7 @@ async def handle_task_creation(message):
             
             # Get channel context for smarter title generation (if needed)
             logger.info("Getting channel context...")
-            all_channel_messages = await get_channel_context(message.channel, limit=20)
+            all_channel_messages = await get_channel_context(message.channel)
             
             # Filter for relevant context using AI
             logger.info("Filtering relevant context with AI...")

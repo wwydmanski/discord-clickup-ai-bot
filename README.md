@@ -213,6 +213,10 @@ CLICKUP_FOLDER_ID=90155097400
 
 # OpenAI (Recommended - enables AI features)
 OPENAI_API_KEY=your_openai_api_key_here
+
+# Optional Settings
+LOG_LEVEL=INFO
+CONTEXT_LIMIT=20
 ```
 
 ### Environment Variables Reference
@@ -225,6 +229,8 @@ OPENAI_API_KEY=your_openai_api_key_here
 | `CLICKUP_TEAM_ID` | ✅ | ClickUp team/workspace ID | - |
 | `CLICKUP_FOLDER_ID` | ⚠️ | Sprint folder ID for current sprint lists | - |
 | `OPENAI_API_KEY` | ⚠️ | OpenAI API key for AI features | - |
+| `LOG_LEVEL` | ❌ | Logging level (DEBUG, INFO, WARNING, ERROR) | `INFO` |
+| `CONTEXT_LIMIT` | ❌ | Number of recent messages analyzed for context | `20` |
 
 ## Docker Configuration Details 🐳
 
