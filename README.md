@@ -61,10 +61,10 @@ The bot uses AI to intelligently recognize when you're giving it a command vs. d
 #### Update Tasks
 Use semantic matching to find and update existing tasks:
 ```
-!update integracja bota z clickupem review
-!update fix login bug in progress  
-!update dokumentacja api closed
-!update authentication system resolved
+/update integracja bota z clickupem review
+/update fix login bug in progress  
+/update dokumentacja api closed
+/update authentication system resolved
 ```
 
 #### View Tasks
@@ -75,9 +75,9 @@ Use semantic matching to find and update existing tasks:
 
 #### Bot Management
 ```
-!help                     # Show detailed help information
-!status                   # Check bot status and connections
-!health                   # Simple health check
+/help                     # Show detailed help information
+/status                   # Check bot status and connections
+/health                   # Simple health check
 ```
 
 ## Valid Task Statuses 📊
