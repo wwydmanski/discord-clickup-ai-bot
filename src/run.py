@@ -122,7 +122,10 @@ def main():
     if response in ['y', 'yes']:
         print()
         try:
-            subprocess.run([sys.executable, 'test_clickup.py'], check=True)
+            subprocess.run([
+                sys.executable,
+                os.path.join(os.path.dirname(__file__), 'test_clickup.py')
+            ], check=True)
         except subprocess.CalledProcessError:
             print()
             response = input("❓ Test failed. Continue anyway? (y/N): ").strip().lower()
